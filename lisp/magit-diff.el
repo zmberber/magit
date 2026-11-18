@@ -3967,16 +3967,31 @@ face."
 
 (defun magit-diff-highlight-hunk-region-using-overlays (section)
   "Emphasize the hunk-internal region using delimiting horizontal lines.
-This is implemented as single-pixel newlines places inside overlays."
+This is implemented as descent-clamped underlines placed inside
+overlays, so that no additional display rows are inserted."
   (if (window-system)
-      (let ((beg (magit-diff-hunk-region-beginning))
-            (end (magit-diff-hunk-region-end))
-            (str (propertize
-                  (concat (propertize "\s" 'display '(space :height (1)))
-                          (propertize "\n" 'line-height t))
-                  'font-lock-face 'magit-diff-lines-boundary)))
-        (magit-diff--make-hunk-overlay beg (1+ beg) 'before-string str)
-        (magit-diff--make-hunk-overlay end (1+ end) 'after-string  str))
+      (let* ((beg (magit-diff-hunk-region-beginning))
+             (end (magit-diff-hunk-region-end))
+             (color (face-background 'magit-diff-lines-boundary nil t))
+             (rule (lambda (pos)
+                     (save-excursion
+                       (goto-char pos)
+                       (let* ((bol (pos-bol))
+                              (eol (pos-eol))
+                              (bg (magit-diff--hunk-region-row-background bol))
+                              (face `( :underline (:color ,color :position 0)
+                                       ,@(when bg `(:background ,bg)))))
+                         (magit-diff--make-hunk-overlay
+                          bol eol 'font-lock-face face 'after-string
+                          (propertize
+                           "\s" 'font-lock-face face
+                           'display (list 'space :align-to
+                                          `(+ (0 . right)
+                                              ,(min (window-hscroll)
+                                                    (- (pos-eol) (pos-bol)))))
+                           'cursor t)))))))
+        (funcall rule (1- beg))
+        (funcall rule end))
     (magit-diff-highlight-hunk-region-using-face section)))
 
 (defun magit-diff-highlight-hunk-region-using-underline (section)
@@ -4002,6 +4017,14 @@ last (visual) lines of the region."
             (ln beg beg-eol :overline color)
             (ln end-bol end :underline color))))
     (magit-diff-highlight-hunk-region-using-face section)))
+
+(defun magit-diff--hunk-region-row-background (pos)
+  "Return the background color of the face effective at POS."
+  (let ((face (get-char-property pos 'face)))
+    (cond ((symbolp face) (face-background face nil t))
+          ((and (consp face) (keywordp (car face)))
+           (plist-get face :background))
+          (face (face-background face nil t)))))
 
 (defun magit-diff--make-hunk-overlay (start end &rest args)
   (let ((ov (make-overlay start end nil t)))
